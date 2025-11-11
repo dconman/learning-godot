@@ -4,6 +4,7 @@ use godot::prelude::*;
 mod main;
 mod mob;
 mod player;
+mod hud;
 
 struct MyExtension;
 

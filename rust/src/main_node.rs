@@ -1,7 +1,8 @@
-use godot::classes::Timer;
+use godot::classes::{AudioStreamPlayer, Timer};
 use godot::classes::{Marker2D, PathFollow2D};
 use godot::prelude::*;
 
+use crate::hud::Hud;
 use crate::mob::Mob;
 use crate::player::Player;
 
@@ -25,17 +26,38 @@ impl Main {
     fn game_over(&self) {
         self.base().get_node_as::<Timer>("MobTimer").stop();
         self.base().get_node_as::<Timer>("ScoreTimer").stop();
+        self.base().get_node_as::<AudioStreamPlayer>("Music").stop();
+        self.base().get_node_as::<AudioStreamPlayer>("DeathSound").play();
+        let mut hud_node = self.base().get_node_as::<Hud>("HUD");
+        let mut hud = hud_node.bind_mut();
+        hud.show_game_over();
     }
 
     fn new_game(&mut self) {
         self.score = 0;
 
+        {
+            let mut hud_node = self.base().get_node_as::<Hud>("HUD");
+            let mut hud = hud_node.bind_mut();
+            hud.update_score(self.score);
+            hud.show_message("Get Ready!");
+        }
+
         let start_position = self
             .base()
             .get_node_as::<Marker2D>("StartPosition")
             .get_position();
-        let mut player = self.base().get_node_as::<Player>("Player");
-        player.bind_mut().start(start_position);
+        {
+            let mut player = self.base().get_node_as::<Player>("Player");
+            player.bind_mut().start(start_position);
+        }
+
+        self.base().get_node_as::<AudioStreamPlayer>("Music").play();
+
+        self.base()
+            .get_tree()
+            .unwrap()
+            .call_group("mobs", "queue_free", &[]);
 
         self.base().get_node_as::<Timer>("StartTimer").start();
     }
@@ -67,35 +89,45 @@ impl Main {
 
         self.base_mut().add_child(&mob);
     }
+
+    fn on_score_timer_timeout(&mut self) {
+        self.score += 1;
+        let mut hud_node = self.base().get_node_as::<Hud>("HUD");
+        let mut hud = hud_node.bind_mut();
+        hud.update_score(self.score);
+    }
 }
 
 #[godot_api]
 impl INode for Main {
     fn ready(&mut self) {
-        self.base()
-            .get_node_as::<Player>("Player")
+        let base = self.base();
+        base.get_node_as::<Player>("Player")
             .signals()
             .hit()
-            .connect_other(self, |this| this.game_over());
+            .connect_other(self, |arg0: &mut Main| Self::game_over(arg0));
 
-        self.base()
-            .get_node_as::<Timer>("ScoreTimer")
+        base.get_node_as::<Timer>("ScoreTimer")
             .signals()
             .timeout()
-            .connect_other(self, |this| this.score += 1);
+            .connect_other(self, Self::on_score_timer_timeout);
 
-        self.base()
-            .get_node_as::<Timer>("StartTimer")
+        base.get_node_as::<Timer>("StartTimer")
             .signals()
             .timeout()
             .connect_other(self, |this| this.on_start_timer_timeout());
 
-        self.base()
-            .get_node_as::<Timer>("MobTimer")
+        base.get_node_as::<Timer>("MobTimer")
             .signals()
             .timeout()
             .connect_other(self, |this| this.on_mob_timer_timeout());
 
-        self.new_game();
+        base.get_node_as::<Hud>("HUD")
+            .bind_mut()
+            .signals()
+            .start_game()
+            .connect_other(self, |this| {
+                this.new_game();
+            });
     }
 }
